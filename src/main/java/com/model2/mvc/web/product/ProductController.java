@@ -1,0 +1,185 @@
+package com.model2.mvc.web.product;
+
+import com.model2.security.AdminAuthorize;
+import com.model2.security.UserAuthorize;
+import com.model2.mvc.common.Page;
+import com.model2.mvc.common.Search;
+import com.model2.mvc.service.domain.Product;
+import com.model2.mvc.service.product.ProductService;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+
+
+
+//==> 회원관리 Controller
+@Controller
+@RequestMapping("/product/*")
+public class ProductController {
+
+    ///Field
+    @Autowired
+    @Qualifier("productServiceImpl")
+    private ProductService productService;
+    //setter Method 구현 않음
+
+    public ProductController(){
+        System.out.println(this.getClass());
+    }
+
+    //==> 아래의 두개를 주석을 풀어 의미를 확인 할것
+    @Value("${pageUnit}")
+    int pageUnit;
+
+    @Value("${pageSize}")
+    int pageSize;
+
+    @Value("${imgPath}")
+    String imgPath;
+
+
+    @AdminAuthorize
+    @GetMapping(value="addProduct")
+    public String addProductView() throws Exception {
+        return "/product/addProductView";
+    }
+
+    @AdminAuthorize
+    @PostMapping(value="addProduct")
+    public String addProduct( @RequestParam("files") List<MultipartFile> files, @ModelAttribute("product") Product product, Model model ) throws Exception {
+
+
+        if (!files.isEmpty()) {
+            StringBuffer productFileName = new StringBuffer();
+            for(MultipartFile file : files) {
+                String fileName = file.getOriginalFilename();
+                productFileName.append(fileName+",");
+                try {
+                    byte[] bytes = file.getBytes();
+                    Path path = Paths.get(imgPath + File.separator + fileName);
+                    Files.write(path, bytes);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            productFileName.deleteCharAt(productFileName.length()-1);
+            product.setFileName(productFileName.toString());
+        } else {
+            System.out.println("파일없음");
+        }
+
+        model.addAttribute("product", product);
+
+        //Business Logic
+        productService.addProduct(product);
+
+        String[] fileNames = product.getFileName().split(",");
+        model.addAttribute("fileNames", fileNames);
+
+        return "/product/getProductView";
+    }
+
+    @RequestMapping(value="getProduct")
+    public String getProduct(@RequestParam("prodNo") int prodNo, @ModelAttribute("menu") String menu, HttpServletRequest request, HttpServletResponse response , Model model ) throws Exception {
+        System.out.println("getProduct execute");
+        //Business Logic
+        Product product = productService.getProduct(prodNo);
+
+        String cookieValue = "";
+        Cookie[] cookies = request.getCookies();
+        if(cookies != null) {
+            for(Cookie c : cookies) {
+                if(c.getName().equals("history")) {
+                    cookieValue = c.getValue();
+                }
+            }
+        }
+        cookieValue += "/" + product.getProdNo();
+
+        Cookie cookie = new Cookie("history", cookieValue);
+        cookie.setMaxAge(3600);
+        response.addCookie(cookie);
+        String[] fileNames = product.getFileName().split(",");
+        // Model 과 View 연결
+        model.addAttribute("fileNames", fileNames);
+        model.addAttribute("product", product);
+
+        return "/product/getProductView";
+    }
+
+    @UserAuthorize
+    @RequestMapping(value="listProduct")
+    public String listProduct( @ModelAttribute("search") Search search , @RequestParam("menu") String menu, Model model ) throws Exception{
+
+        System.out.println("/listProduct");
+
+        String orderBy = search.getOrderBy();
+        if(orderBy == null || orderBy.equals("")) {
+            search.setOrderBy("prodNo");
+        }
+//        if(search.getCurrentPage() == 0) {
+//            search.setCurrentPage(0);
+//        }
+        int startRowNum = search.getCurrentPage() * pageSize - pageSize+1;
+        int endRowNum = startRowNum + pageSize - 1;
+
+        System.out.println("startRowNum :: " + startRowNum + "\nendRowNum:: " + endRowNum);
+
+        search.setStartRowNum(startRowNum);
+        search.setEndRowNum(endRowNum);
+        search.setPageSize(pageSize);
+
+        System.out.println(search.getSearchCondition() + " " + search.getSearchKeyword());
+
+        Map<String, Object> map = productService.getProductList(search);
+
+        System.out.println(map);
+
+        //Business Logic
+
+        Page resultPage = new Page(search.getCurrentPage(), ((Integer)map.get("totalCount")).intValue(), pageUnit, pageSize);
+        model.addAttribute("list", map.get("list"));
+        model.addAttribute("resultPage", resultPage);
+        model.addAttribute("menu", menu);
+        // Model 과 View 연결
+        return "/product/listProductView";
+    }
+
+    @RequestMapping(value="/updateProduct", method = RequestMethod.GET)
+    public String updateProductView( @RequestParam("prodNo") int prodNo , Model model) throws Exception{
+
+        System.out.println("/updateProductView.do");
+        //Business Logic
+        Product product = productService.getProduct(prodNo);
+        model.addAttribute("product", product);
+
+        return "/product/updateProductView";
+    }
+
+    @RequestMapping(value="/updateProduct", method = RequestMethod.POST)
+    public String updateProduct( @ModelAttribute Product product) throws Exception{
+        System.out.println("/updateProduct.do");
+        product.setManuDate(product.getManuDate().trim());
+        System.out.println(product.getManuDate());
+        productService.updateProduct(product);
+
+        return "redirect:/product/getProduct?prodNo="+product.getProdNo()+"&menu=ok";
+    }
+
+
+}
